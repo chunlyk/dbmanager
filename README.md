@@ -1,31 +1,7 @@
-# 数据库实例管理系统（DB Instance Manager）
+# 数据库实例管理系统 — 方案 A
+# 基于 Django + DRF + Celery + Redis 的企业内部数据库实例管理系统。
 
-基于 **Django + DRF + Celery + Redis** 的企业内部数据库实例管理系统，用于统一管理数据库实例、集群与部门，并提供密码自动轮换、实例统计、TCP 端口探测与请求耗时监控能力。
-
-## ✨ 功能特性
-
-- 🗂 **资源建模**：部门（Department）、集群（Cluster）、实例（Instance）三级模型
-- 🔧 **完整 CRUD**：基于 Django REST Framework 的标准增删改查接口，支持过滤与分页
-- 🔐 **密码安全**：实例密码使用 Fernet（AES-128-CBC + HMAC-SHA256）加密存储，明文永不出库
-- 🔁 **自动轮换**：Celery Beat 每 12 小时（00:00 / 12:00）为所有启用实例随机生成并加密保存新密码
-- 📊 **每日统计**：每天 00:00 按「部门 + 集群」维度统计启用实例数量并幂等写入数据库
-- 🌐 **TCP 探测**：提供 API 探测实例的 TCP 端口是否可达，返回延迟与错误信息
-- ⏱ **耗时监控**：中间件统计每个请求的耗时，写入日志、响应头，并可选持久化到数据库
-- 🛠 **Admin 后台**：Django Admin 可视化管理所有资源
-
-## 🧱 技术栈
-
-| 组件 | 版本 | 说明 |
-|---|---|---|
-| Python | >= 3.10 | 语言运行时 |
-| Django | >= 4.2, < 5.1 | Web 框架 |
-| Django REST Framework | >= 3.14 | REST API |
-| Celery | >= 5.3 | 异步任务 & 定时调度 |
-| Redis | >= 5.0 | 消息队列 / 结果后端 |
-| cryptography | >= 42.0 | 密码加解密 |
-| SQLite / PostgreSQL / MySQL | - | 演示用 SQLite，生产建议 PostgreSQL |
-
-## 📁 项目结构
+## 项目结构
 
 ```
 dbmanager/
@@ -43,71 +19,76 @@ dbmanager/
 └── apps/
     └── dbmanager/
         ├── apps.py
-        ├── crypto.py         # 密码加密 / 随机生成
-        ├── models.py         # 部门 / 集群 / 实例 / 统计 / 请求日志
+        ├── crypto.py         # 密码加密
+        ├── models.py         
         ├── serializers.py
         ├── services.py       # TCP 探测、密码轮换
-        ├── views.py          # CRUD + 探测 + 轮换接口
+        ├── views.py          
         ├── urls.py
         ├── tasks.py          # Celery 定时任务
         ├── middleware.py     # 请求耗时中间件
         ├── admin.py
         └── migrations/
 ```
+## 数据模型设计
 
-## 🚀 快速开始
+### Department（部门）
 
-### 1. 克隆项目
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| name | CharField(128) | 部门名称，唯一 |
+| code | CharField(64) | 部门编码，唯一 |
+| description | TextField | 描述，可空 |
+| created_at / updated_at | DateTimeField | 时间戳 |
 
-```bash
-# GitHub
-git clone https://github.com/<your-name>/dbmanager.git
-# Gitee
-git clone https://gitee.com/<your-name>/dbmanager.git
+### Cluster（集群）
 
-cd dbmanager
-```
+| 字段 | 类型 | 说明                       |
+|------|------|--------------------------|
+| name | CharField(128) | 集群名称                     |
+| department | FK → Department | 所属部门                     |
+| environment | CharField | 环境：dev/test/prod/staging |
+| description | TextField | 描述                       |
+| created_at / updated_at | DateTimeField | 时间戳                      |
 
-### 2. 创建虚拟环境并安装依赖
+### Instance（数据库实例）
 
-```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+| 字段 | 类型 | 说明 |
+|------|------|----|
+| name | CharField(128) | 实例名称 |
+| host | CharField(255) | 主机 |
+| port | PositiveIntegerField | 端口，默认 3306 |
+| db_type | CharField | mysql/postgresql/redis/mongodb 等 |
+| cluster | FK → Cluster | 所属集群 |
+| is_active | CharField | 是否启用 |
+| username | CharField(128) | 账号 |
+| password_encrypted | TextField | Fernet 加密密码 |
+| password_updated_at | DateTimeField | 密码更新时间 |
+| created_at / updated_at | DateTimeField | 时间戳 |
 
-pip install -r requirements.txt
-```
+> 密码不以明文落库；读取时通过 `get_password()` / `set_password()` 加解密。
 
-### 3. 配置环境变量
+### InstanceStat（每日统计）
 
-```bash
-cp .env .env
-# 编辑 .env，至少修改 DJANGO_SECRET_KEY 与 PASSWORD_ENCRYPTION_KEY
-```
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| stat_date | DateField | 统计日期 |
+| department | FK → Department | 部门 |
+| cluster | FK → Cluster | 集群 |
+| instance_count | PositiveIntegerField | 实例数量 |
+| created_at / updated_at | DateTimeField | 写入时间 |
 
-### 4. 初始化数据库
+### RequestLog（请求耗时明细）
 
-```bash
-python manage.py makemigrations dbmanager
-python manage.py migrate
-python manage.py createsuperuser
-```
+| 字段 | 类型 | 说明 |
+|------|------|--|
+| method | CharField |
+| path | CharField |
+| status_code | PositiveIntegerField |
+| duration_ms | FloatField |
+| created_at | DateTimeField |
 
-### 5. 启动服务
-
-```bash
-# Web
-python manage.py runserver 0.0.0.0:8000
-
-# Celery Worker（另开终端）
-celery -A config worker -l info
-
-# Celery Beat 定时调度（另开终端）
-celery -A config beat -l info
-```
-
-> 生产环境建议使用 `supervisor` / `systemd` / `docker-compose` 托管进程，`beat` 建议改用 `django-celery-beat` 或 `redbeat` 避免单点。
-
-## 🔌 API 一览
+## API 一览
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -153,7 +134,7 @@ curl -X POST http://127.0.0.1:8000/api/instances/1/probe/ \
 curl -X POST http://127.0.0.1:8000/api/instances/1/rotate-password/
 ```
 
-## ⏰ 定时任务
+## 定时任务
 
 | 任务名 | 调度 | 说明 |
 |---|---|---|
@@ -166,18 +147,7 @@ curl -X POST http://127.0.0.1:8000/api/instances/1/rotate-password/
 python manage.py shell -c "from apps.dbmanager.tasks import collect_daily_instance_stats; collect_daily_instance_stats.delay('2025-01-01')"
 ```
 
-## 🔒 安全说明
-
-1. 密码明文 **永不入库**，仅以 Fernet 密文形式保存在 `Instance.password_encrypted` 字段。
-2. `PASSWORD_ENCRYPTION_KEY` 必须独立于 `SECRET_KEY`，并通过环境变量或 KMS/Vault 注入。
-3. 生产环境请：
-   - 关闭 `DEBUG`
-   - 设置 `ALLOWED_HOSTS`
-   - 为 `/instances/{id}/password/` 增加二次审批与审计日志
-   - 使用 HTTPS 传输
-4. 密码轮换到真实数据库（`ALTER USER` / `CONFIG SET requirepass`）时，建议采用「先改远端成功 → 再落库 → 失败进补偿队列」的流程。
-
-## 🧪 本地自测
+## 本地自测
 
 ```bash
 # 触发一次密码轮换
@@ -187,18 +157,52 @@ python manage.py shell -c "from apps.dbmanager.tasks import rotate_instance_pass
 python manage.py shell -c "from apps.dbmanager.tasks import collect_daily_instance_stats; collect_daily_instance_stats.delay()"
 ```
 
-## 🗺 Roadmap
+## 本地运行步骤
 
-- [ ] 支持 MySQL / PostgreSQL / Redis 真实改密
-- [ ] 接入 Vault / KMS 管理加密密钥
-- [ ] 实例探测结果缓存与批量探测
-- [ ] Prometheus 指标导出
-- [ ] Docker Compose 一键部署
+## 1. 克隆项目
 
-## 📄 License
+```bash
+# GitHub
+git clone https://github.com/<your-name>/dbmanager.git
+# Gitee
+git clone https://gitee.com/<your-name>/dbmanager.git
 
-[MIT](LICENSE)
+cd dbmanager
+```
 
-## 🙋 贡献
+## 2. 创建虚拟环境并安装依赖
 
-欢迎提交 Issue 和 Pull Request。
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+pip install -r requirements.txt
+```
+
+## 3. 配置环境变量
+
+```bash
+cp .env .env
+# 编辑 .env，至少修改 DJANGO_SECRET_KEY 与 PASSWORD_ENCRYPTION_KEY
+```
+
+## 4. 初始化数据库
+
+```bash
+python manage.py makemigrations dbmanager
+python manage.py migrate
+python manage.py createsuperuser
+```
+
+## 5. 启动服务
+
+```bash
+# Web
+python manage.py runserver 0.0.0.0:8000
+
+# Celery Worker（另开终端）
+celery -A config worker -l info
+
+# Celery Beat 定时调度（另开终端）
+celery -A config beat -l info
+```
