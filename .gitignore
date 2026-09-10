@@ -30,7 +30,6 @@ celerybeat.pid
 
 # ---------- 环境变量 / 密钥 ----------
 .env
-.env
 !.env
 *.pem
 *.key
