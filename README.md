@@ -106,34 +106,6 @@ dbmanager/
 
 ### 调用示例
 
-**探测实例是否可达**
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/instances/1/probe/ \
-     -H "Content-Type: application/json" \
-     -d '{"timeout": 3}'
-```
-
-响应：
-
-```json
-{
-  "instance_id": 1,
-  "name": "mysql-prod-01",
-  "host": "10.0.0.10",
-  "port": 3306,
-  "reachable": true,
-  "latency_ms": 12.34,
-  "error": null
-}
-```
-
-**手动轮换密码**
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/instances/1/rotate-password/
-```
-
 ## 定时任务
 
 | 任务名 | 调度 | 说明 |
